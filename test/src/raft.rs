@@ -205,6 +205,7 @@ fn node_creation() {
         peers: vec![2, 3],
         election_timeout_ms: 150,
         heartbeat_interval_ms: 50,
+        ..Default::default()
     };
 
     let node = Node::new(config);
