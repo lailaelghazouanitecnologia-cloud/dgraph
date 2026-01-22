@@ -4,11 +4,10 @@
 
 #![deny(missing_docs, clippy::all, clippy::pedantic)]
 
-use bytes::Bytes;
 use prost::Message;
 
 /// Request wrapper
-#[derive(Clone, Debug, Message)]
+#[derive(Clone, PartialEq, Message)]
 pub struct Request {
     /// Query string
     #[prost(string, tag = "1")]
@@ -28,11 +27,11 @@ pub struct Request {
 }
 
 /// Response wrapper
-#[derive(Clone, Debug, Message)]
+#[derive(Clone, PartialEq, Message)]
 pub struct Response {
     /// JSON response data
-    #[prost(bytes, tag = "1")]
-    pub json: Bytes,
+    #[prost(bytes = "vec", tag = "1")]
+    pub json: Vec<u8>,
     /// Transaction context
     #[prost(message, optional, tag = "2")]
     pub txn: Option<TxnContext>,
@@ -42,7 +41,7 @@ pub struct Response {
 }
 
 /// Transaction context
-#[derive(Clone, Debug, Message)]
+#[derive(Clone, PartialEq, Message)]
 pub struct TxnContext {
     /// Start timestamp
     #[prost(uint64, tag = "1")]
@@ -54,15 +53,15 @@ pub struct TxnContext {
     #[prost(bool, tag = "3")]
     pub aborted: bool,
     /// Keys modified
-    #[prost(bytes, repeated, tag = "4")]
-    pub keys: Vec<Bytes>,
+    #[prost(bytes = "vec", repeated, tag = "4")]
+    pub keys: Vec<Vec<u8>>,
     /// Predicates modified
     #[prost(string, repeated, tag = "5")]
     pub preds: Vec<String>,
 }
 
 /// Latency information
-#[derive(Clone, Debug, Default, Message)]
+#[derive(Clone, PartialEq, Message)]
 pub struct Latency {
     /// Parsing latency in nanoseconds
     #[prost(uint64, tag = "1")]
@@ -79,20 +78,20 @@ pub struct Latency {
 }
 
 /// Mutation
-#[derive(Clone, Debug, Message)]
+#[derive(Clone, PartialEq, Message)]
 pub struct Mutation {
     /// Set triples (JSON)
-    #[prost(bytes, tag = "1")]
-    pub set_json: Bytes,
+    #[prost(bytes = "vec", tag = "1")]
+    pub set_json: Vec<u8>,
     /// Delete triples (JSON)
-    #[prost(bytes, tag = "2")]
-    pub delete_json: Bytes,
+    #[prost(bytes = "vec", tag = "2")]
+    pub delete_json: Vec<u8>,
     /// Set triples (NQuads)
-    #[prost(bytes, tag = "3")]
-    pub set_nquads: Bytes,
+    #[prost(bytes = "vec", tag = "3")]
+    pub set_nquads: Vec<u8>,
     /// Delete triples (NQuads)
-    #[prost(bytes, tag = "4")]
-    pub del_nquads: Bytes,
+    #[prost(bytes = "vec", tag = "4")]
+    pub del_nquads: Vec<u8>,
     /// Condition
     #[prost(string, tag = "5")]
     pub cond: String,
@@ -102,8 +101,8 @@ pub struct Mutation {
 }
 
 /// Operation (alter schema, etc.)
-#[derive(Clone, Debug, Message)]
-pub struct Operation {
+#[derive(Clone, PartialEq, Message)]
+pub struct ProtoOperation {
     /// Schema string
     #[prost(string, tag = "1")]
     pub schema: String,
@@ -133,7 +132,7 @@ pub enum DropOp {
 }
 
 /// Version info
-#[derive(Clone, Debug, Message)]
+#[derive(Clone, PartialEq, Message)]
 pub struct Version {
     /// Version tag
     #[prost(string, tag = "1")]

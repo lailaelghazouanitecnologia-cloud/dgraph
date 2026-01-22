@@ -46,6 +46,18 @@ pub struct Key {
     data: Bytes,
 }
 
+impl Ord for Key {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        self.data.cmp(&other.data)
+    }
+}
+
+impl PartialOrd for Key {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
 impl Key {
     /// Create a data key: predicate + subject UID
     ///

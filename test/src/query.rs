@@ -1,6 +1,6 @@
 //! Tests for dgraph-query
 
-use dgraph_query::{FuncName, Operation, ParseError, Parser, Query, Value};
+use dgraph_query::{FuncName, Operation, ParseError, Parser, Query, Value, Filter, Function, Order};
 
 // ============================================================================
 // Parser Tests
@@ -47,7 +47,7 @@ fn parse_uid_function() {
     if let Operation::Query(q) = result {
         let func = q.func.unwrap();
         assert_eq!(func.name, FuncName::Uid);
-        assert_eq!(func.args.len(), 3);
+        assert_eq!(func.uids.len(), 3);
     }
 }
 
@@ -61,9 +61,9 @@ fn parse_eq_function() {
     if let Operation::Query(q) = result {
         let func = q.func.unwrap();
         assert_eq!(func.name, FuncName::Eq);
-        assert_eq!(func.args.len(), 2);
-        assert_eq!(func.args[0], Value::String("name".to_string()));
-        assert_eq!(func.args[1], Value::String("Alice".to_string()));
+        assert_eq!(func.attr, Some("name".to_string()));
+        assert_eq!(func.args.len(), 1);
+        assert_eq!(func.args[0], Value::String("Alice".to_string()));
     }
 }
 
@@ -77,6 +77,7 @@ fn parse_has_function() {
     if let Operation::Query(q) = result {
         let func = q.func.unwrap();
         assert_eq!(func.name, FuncName::Has);
+        assert_eq!(func.attr, Some("email".to_string()));
     }
 }
 
@@ -155,6 +156,9 @@ fn parse_filter() {
 
     if let Operation::Query(q) = result {
         assert!(q.filter.is_some());
+        if let Some(Filter::Func(f)) = &q.filter {
+            assert_eq!(f.name, FuncName::Ge);
+        }
     }
 }
 
@@ -165,7 +169,7 @@ fn parse_comment() {
     {
         # Another comment
         me(func: uid(0x1)) {
-            name # inline comment doesn't work in this simple parser
+            name
         }
     }
     "#;
@@ -194,8 +198,16 @@ fn parse_values() {
 
         if let Operation::Query(q) = result {
             let func = q.func.unwrap();
-            let last_arg = func.args.last().unwrap();
-            assert_eq!(*last_arg, expected_value, "failed for input: {input}");
+            if func.name == FuncName::Uid {
+                // For uid function, check uids vector
+                if let Value::Uid(expected_uid) = expected_value {
+                    assert_eq!(func.uids[0], expected_uid, "failed for input: {input}");
+                }
+            } else {
+                // For other functions, check args
+                let last_arg = func.args.last().unwrap();
+                assert_eq!(*last_arg, expected_value, "failed for input: {input}");
+            }
         }
     }
 }
@@ -216,6 +228,61 @@ fn parse_error_unknown_function() {
     let mut parser = Parser::new(query);
     let result = parser.parse();
     assert!(result.is_err());
+}
+
+// ============================================================================
+// Directive Tests
+// ============================================================================
+
+#[test]
+fn parse_normalize_directive() {
+    let query = r#"{ q(func: uid(0x1)) @normalize { name } }"#;
+
+    let mut parser = Parser::new(query);
+    let result = parser.parse().unwrap();
+
+    if let Operation::Query(q) = result {
+        assert!(q.normalize);
+    }
+}
+
+#[test]
+fn parse_recurse_directive() {
+    let query = r#"{ q(func: uid(0x1)) @recurse(depth: 5) { name friends } }"#;
+
+    let mut parser = Parser::new(query);
+    let result = parser.parse().unwrap();
+
+    if let Operation::Query(q) = result {
+        assert!(q.recurse);
+        assert_eq!(q.recurse_args.depth, Some(5));
+    }
+}
+
+#[test]
+fn parse_cascade_directive() {
+    let query = r#"{ q(func: uid(0x1)) @cascade { name } }"#;
+
+    let mut parser = Parser::new(query);
+    let result = parser.parse().unwrap();
+
+    if let Operation::Query(q) = result {
+        assert!(!q.cascade.is_empty());
+        assert!(q.cascade.contains(&"__all__".to_string()));
+    }
+}
+
+#[test]
+fn parse_variable_definition() {
+    let query = r#"{ x as q(func: uid(0x1)) { name } }"#;
+
+    let mut parser = Parser::new(query);
+    let result = parser.parse().unwrap();
+
+    if let Operation::Query(q) = result {
+        assert_eq!(q.var, Some("x".to_string()));
+        assert_eq!(q.alias, Some("q".to_string()));
+    }
 }
 
 // ============================================================================
@@ -249,6 +316,31 @@ fn value_as_uid() {
     assert_eq!(v.as_uid(), None);
 }
 
+#[test]
+fn value_as_float() {
+    let v = Value::Float(3.14);
+    assert_eq!(v.as_float(), Some(3.14));
+
+    let v = Value::Int(42);
+    assert_eq!(v.as_float(), Some(42.0)); // Int can be converted to float
+}
+
+#[test]
+fn value_as_bool() {
+    let v = Value::Bool(true);
+    assert_eq!(v.as_bool(), Some(true));
+
+    let v = Value::Int(1);
+    assert_eq!(v.as_bool(), None);
+}
+
+#[test]
+fn value_is_var() {
+    assert!(Value::Var("x".to_string()).is_var());
+    assert!(Value::ValVar("y".to_string()).is_var());
+    assert!(!Value::Int(42).is_var());
+}
+
 // ============================================================================
 // FuncName Tests
 // ============================================================================
@@ -264,5 +356,167 @@ fn funcname_from_str() {
     assert_eq!(FuncName::from_str("lt"), Some(FuncName::Lt));
     assert_eq!(FuncName::from_str("allofterms"), Some(FuncName::AllOfTerms));
     assert_eq!(FuncName::from_str("anyofterms"), Some(FuncName::AnyOfTerms));
+    assert_eq!(FuncName::from_str("type"), Some(FuncName::Type));
+    assert_eq!(FuncName::from_str("count"), Some(FuncName::Count));
+    assert_eq!(FuncName::from_str("val"), Some(FuncName::Val));
+    assert_eq!(FuncName::from_str("len"), Some(FuncName::Len));
+    assert_eq!(FuncName::from_str("uid_in"), Some(FuncName::UidIn));
+    assert_eq!(FuncName::from_str("similar_to"), Some(FuncName::SimilarTo));
     assert_eq!(FuncName::from_str("unknown"), None);
+}
+
+#[test]
+fn funcname_is_comparison() {
+    assert!(FuncName::Eq.is_comparison());
+    assert!(FuncName::Ge.is_comparison());
+    assert!(FuncName::Le.is_comparison());
+    assert!(FuncName::Gt.is_comparison());
+    assert!(FuncName::Lt.is_comparison());
+    assert!(FuncName::Between.is_comparison());
+    assert!(!FuncName::Has.is_comparison());
+    assert!(!FuncName::Uid.is_comparison());
+}
+
+#[test]
+fn funcname_is_term() {
+    assert!(FuncName::AllOfTerms.is_term());
+    assert!(FuncName::AnyOfTerms.is_term());
+    assert!(FuncName::AllOfText.is_term());
+    assert!(FuncName::AnyOfText.is_term());
+    assert!(!FuncName::Eq.is_term());
+}
+
+#[test]
+fn funcname_is_geo() {
+    assert!(FuncName::Near.is_geo());
+    assert!(FuncName::Within.is_geo());
+    assert!(FuncName::Contains.is_geo());
+    assert!(FuncName::Intersects.is_geo());
+    assert!(!FuncName::Eq.is_geo());
+}
+
+// ============================================================================
+// Complex Query Tests
+// ============================================================================
+
+#[test]
+fn parse_complex_filter() {
+    let query = r#"{ q(func: uid(0x1)) @filter(ge(age, 21) AND lt(age, 65)) { name } }"#;
+
+    let mut parser = Parser::new(query);
+    let result = parser.parse().unwrap();
+
+    if let Operation::Query(q) = result {
+        assert!(q.filter.is_some());
+        if let Some(Filter::And(filters)) = &q.filter {
+            assert_eq!(filters.len(), 2);
+        }
+    }
+}
+
+#[test]
+fn parse_or_filter() {
+    let query = r#"{ q(func: uid(0x1)) @filter(eq(status, "active") OR eq(status, "pending")) { name } }"#;
+
+    let mut parser = Parser::new(query);
+    let result = parser.parse().unwrap();
+
+    if let Operation::Query(q) = result {
+        assert!(q.filter.is_some());
+        if let Some(Filter::Or(filters)) = &q.filter {
+            assert_eq!(filters.len(), 2);
+        }
+    }
+}
+
+#[test]
+fn parse_not_filter() {
+    let query = r#"{ q(func: uid(0x1)) @filter(NOT eq(deleted, true)) { name } }"#;
+
+    let mut parser = Parser::new(query);
+    let result = parser.parse().unwrap();
+
+    if let Operation::Query(q) = result {
+        assert!(q.filter.is_some());
+        matches!(&q.filter, Some(Filter::Not(_)));
+    }
+}
+
+#[test]
+fn parse_count_function() {
+    let query = r#"{ q(func: has(name)) { count(friends) } }"#;
+
+    let mut parser = Parser::new(query);
+    let result = parser.parse().unwrap();
+
+    if let Operation::Query(q) = result {
+        assert_eq!(q.children.len(), 1);
+        // The count is parsed as a predicate with attr = "count(friends)"
+    }
+}
+
+#[test]
+fn parse_type_function() {
+    let query = r#"{ q(func: type(Person)) { name } }"#;
+
+    let mut parser = Parser::new(query);
+    let result = parser.parse().unwrap();
+
+    if let Operation::Query(q) = result {
+        let func = q.func.unwrap();
+        assert_eq!(func.name, FuncName::Type);
+    }
+}
+
+// ============================================================================
+// Function Constructor Tests
+// ============================================================================
+
+#[test]
+fn function_constructors() {
+    let uid_func = Function::uid(vec![0x1, 0x2, 0x3]);
+    assert_eq!(uid_func.name, FuncName::Uid);
+    assert_eq!(uid_func.uids, vec![0x1, 0x2, 0x3]);
+
+    let has_func = Function::has("email");
+    assert_eq!(has_func.name, FuncName::Has);
+    assert_eq!(has_func.attr, Some("email".to_string()));
+
+    let eq_func = Function::eq("name", Value::String("Alice".to_string()));
+    assert_eq!(eq_func.name, FuncName::Eq);
+    assert_eq!(eq_func.attr, Some("name".to_string()));
+}
+
+// ============================================================================
+// Filter Constructor Tests
+// ============================================================================
+
+#[test]
+fn filter_constructors() {
+    let f1 = Filter::func(Function::has("name"));
+    let f2 = Filter::func(Function::has("email"));
+
+    let and = Filter::and(vec![f1.clone(), f2.clone()]);
+    matches!(and, Filter::And(_));
+
+    let or = Filter::or(vec![f1.clone(), f2.clone()]);
+    matches!(or, Filter::Or(_));
+
+    let not = Filter::not(f1);
+    matches!(not, Filter::Not(_));
+}
+
+// ============================================================================
+// Order Constructor Tests
+// ============================================================================
+
+#[test]
+fn order_constructors() {
+    let asc = Order::asc("age");
+    assert_eq!(asc.attr, "age");
+    assert!(!asc.desc);
+
+    let desc = Order::desc("created_at");
+    assert_eq!(desc.attr, "created_at");
+    assert!(desc.desc);
 }

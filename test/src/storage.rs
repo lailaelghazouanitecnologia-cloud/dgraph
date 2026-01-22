@@ -2,7 +2,7 @@
 
 use bytes::Bytes;
 use dgraph_common::{Key, Timestamp, Uid};
-use dgraph_storage::{Posting, PostingKind, PostingList, Store, StoreConfig};
+use dgraph_storage::{Facet, Op, Posting, PostingList, PostingType, Store, StoreConfig, ValType};
 use std::sync::Arc;
 
 // ============================================================================
@@ -16,7 +16,8 @@ fn posting_reference() {
     let posting = Posting::reference(uid, ts);
 
     assert_eq!(posting.uid, 42);
-    assert_eq!(posting.kind, PostingKind::Ref);
+    assert_eq!(posting.posting_type, PostingType::Ref);
+    assert_eq!(posting.val_type, ValType::Uid);
     assert_eq!(posting.commit_ts, ts);
     assert!(posting.value.is_empty());
 }
@@ -28,9 +29,43 @@ fn posting_value() {
     let posting = Posting::value(data.clone(), ts);
 
     assert_eq!(posting.uid, 0);
-    assert_eq!(posting.kind, PostingKind::Value);
+    assert_eq!(posting.posting_type, PostingType::Value);
     assert_eq!(posting.commit_ts, ts);
     assert_eq!(posting.value, data);
+}
+
+#[test]
+fn posting_typed_values() {
+    let ts = Timestamp::new(100);
+
+    // String posting
+    let p = Posting::string("hello", ts);
+    assert_eq!(p.val_type, ValType::String);
+    assert_eq!(p.value_as_str(), Some("hello"));
+
+    // Int posting
+    let p = Posting::int(42, ts);
+    assert_eq!(p.val_type, ValType::Int);
+    assert_eq!(p.value_as_int(), Some(42));
+
+    // Float posting
+    let p = Posting::float(3.14, ts);
+    assert_eq!(p.val_type, ValType::Float);
+    assert!((p.value_as_float().unwrap() - 3.14).abs() < 0.001);
+
+    // Bool posting
+    let p = Posting::bool(true, ts);
+    assert_eq!(p.val_type, ValType::Bool);
+    assert_eq!(p.value_as_bool(), Some(true));
+}
+
+#[test]
+fn posting_with_lang() {
+    let ts = Timestamp::new(100);
+    let posting = Posting::value_lang(Bytes::from("Hola"), "es", ts);
+
+    assert_eq!(posting.posting_type, PostingType::ValueLang);
+    assert_eq!(posting.lang(), Some("es"));
 }
 
 #[test]
@@ -41,7 +76,19 @@ fn posting_with_facet() {
         .with_facet("weight".to_string(), Bytes::from("0.5"));
 
     assert_eq!(posting.facets.len(), 1);
-    assert_eq!(posting.facets[0].0, "weight");
+    assert_eq!(posting.facets[0].key, "weight");
+}
+
+#[test]
+fn posting_with_typed_facet() {
+    let uid = Uid::new(42).unwrap();
+    let ts = Timestamp::new(100);
+
+    let facet = Facet::float("weight", 0.5);
+    let posting = Posting::reference(uid, ts).with_typed_facet(facet);
+
+    assert_eq!(posting.facets.len(), 1);
+    assert_eq!(posting.facet("weight").unwrap().as_float(), Some(0.5));
 }
 
 #[test]
@@ -56,6 +103,20 @@ fn posting_visibility() {
     // Not visible before commit_ts
     assert!(!posting.visible_at(Timestamp::new(50)));
     assert!(!posting.visible_at(Timestamp::new(99)));
+}
+
+#[test]
+fn posting_is_ref_is_value() {
+    let uid = Uid::new(42).unwrap();
+    let ts = Timestamp::new(100);
+
+    let ref_posting = Posting::reference(uid, ts);
+    assert!(ref_posting.is_ref());
+    assert!(!ref_posting.is_value());
+
+    let val_posting = Posting::string("test", ts);
+    assert!(!val_posting.is_ref());
+    assert!(val_posting.is_value());
 }
 
 // ============================================================================
@@ -150,6 +211,35 @@ fn posting_list_uids_at() {
     assert_eq!(uids.len(), 2);
     assert!(uids.contains(&Uid::new(10).unwrap()));
     assert!(uids.contains(&Uid::new(20).unwrap()));
+}
+
+#[test]
+fn posting_list_gc() {
+    let mut pl = PostingList::new();
+    let uid = Uid::new(1).unwrap();
+
+    // Add multiple versions
+    pl.add(Posting::reference(uid, Timestamp::new(100)));
+    pl.add(Posting::reference(uid, Timestamp::new(200)));
+    pl.add(Posting::reference(uid, Timestamp::new(300)));
+
+    assert_eq!(pl.len(), 3);
+
+    // GC below watermark 250
+    let removed = pl.gc(Timestamp::new(250));
+    assert!(removed > 0);
+}
+
+#[test]
+fn posting_list_merge() {
+    let mut pl1 = PostingList::new();
+    pl1.add(Posting::reference(Uid::new(1).unwrap(), Timestamp::new(100)));
+
+    let mut pl2 = PostingList::new();
+    pl2.add(Posting::reference(Uid::new(2).unwrap(), Timestamp::new(100)));
+
+    pl1.merge(pl2);
+    assert_eq!(pl1.count_at(Timestamp::new(100)), 2);
 }
 
 // ============================================================================
@@ -259,4 +349,67 @@ fn store_gc() {
     // Store should still work
     let txn = store.begin();
     assert!(txn.start_ts().is_valid());
+}
+
+// ============================================================================
+// ValType Tests
+// ============================================================================
+
+#[test]
+fn val_type_from_u8() {
+    assert_eq!(ValType::from_u8(0), Some(ValType::Default));
+    assert_eq!(ValType::from_u8(2), Some(ValType::Int));
+    assert_eq!(ValType::from_u8(3), Some(ValType::Float));
+    assert_eq!(ValType::from_u8(9), Some(ValType::String));
+    assert_eq!(ValType::from_u8(255), None);
+}
+
+#[test]
+fn val_type_is_numeric() {
+    assert!(ValType::Int.is_numeric());
+    assert!(ValType::Float.is_numeric());
+    assert!(ValType::BigFloat.is_numeric());
+    assert!(!ValType::String.is_numeric());
+    assert!(!ValType::Bool.is_numeric());
+}
+
+#[test]
+fn val_type_is_string_like() {
+    assert!(ValType::String.is_string_like());
+    assert!(ValType::Password.is_string_like());
+    assert!(ValType::Default.is_string_like());
+    assert!(!ValType::Int.is_string_like());
+}
+
+// ============================================================================
+// Facet Tests
+// ============================================================================
+
+#[test]
+fn facet_string() {
+    let f = Facet::string("key", "value");
+    assert_eq!(f.key, "key");
+    assert_eq!(f.as_str(), Some("value"));
+    assert_eq!(f.val_type, ValType::String);
+}
+
+#[test]
+fn facet_int() {
+    let f = Facet::int("count", 42);
+    assert_eq!(f.as_int(), Some(42));
+    assert_eq!(f.val_type, ValType::Int);
+}
+
+#[test]
+fn facet_float() {
+    let f = Facet::float("weight", 3.14);
+    assert!((f.as_float().unwrap() - 3.14).abs() < 0.001);
+    assert_eq!(f.val_type, ValType::Float);
+}
+
+#[test]
+fn facet_bool() {
+    let f = Facet::bool("active", true);
+    assert_eq!(f.as_bool(), Some(true));
+    assert_eq!(f.val_type, ValType::Bool);
 }

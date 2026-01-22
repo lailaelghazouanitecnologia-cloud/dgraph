@@ -14,11 +14,21 @@ pub enum Error {
 
     /// Key too large
     #[error("key size {size} exceeds max {max}")]
-    KeyTooLarge { size: usize, max: usize },
+    KeyTooLarge {
+        /// Actual size
+        size: usize,
+        /// Maximum allowed size
+        max: usize,
+    },
 
     /// Value too large
     #[error("value size {size} exceeds max {max}")]
-    ValueTooLarge { size: usize, max: usize },
+    ValueTooLarge {
+        /// Actual size
+        size: usize,
+        /// Maximum allowed size
+        max: usize,
+    },
 
     /// Key not found
     #[error("key not found")]
@@ -34,7 +44,12 @@ pub enum Error {
 
     /// Transaction too old
     #[error("transaction ts {txn_ts} older than watermark {watermark}")]
-    TxnTooOld { txn_ts: u64, watermark: u64 },
+    TxnTooOld {
+        /// Transaction timestamp
+        txn_ts: u64,
+        /// Current watermark
+        watermark: u64,
+    },
 
     /// Storage error
     #[error("storage: {0}")]
@@ -50,7 +65,12 @@ pub enum Error {
 
     /// Query parse error
     #[error("parse error at position {pos}: {msg}")]
-    Parse { pos: usize, msg: String },
+    Parse {
+        /// Position in input
+        pos: usize,
+        /// Error message
+        msg: String,
+    },
 
     /// IO error
     #[error("io: {0}")]

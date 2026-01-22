@@ -19,7 +19,7 @@ mod timestamp;
 pub use error::{Error, Result};
 pub use uid::Uid;
 pub use key::{Key, KeyKind};
-pub use timestamp::Timestamp;
+pub use timestamp::{Timestamp, TimestampOracle};
 
 /// Panic in debug, return error in release.
 #[macro_export]

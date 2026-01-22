@@ -1,7 +1,7 @@
 [package]
 name = "dgraph-test"
 version = "0.1.0"
-edition = "2024"
+edition = "2021"
 publish = false
 
 [dependencies]
@@ -10,6 +10,7 @@ dgraph-storage = { path = "../engine/dgraph-storage" }
 dgraph-query = { path = "../engine/dgraph-query" }
 dgraph-raft = { path = "../engine/dgraph-raft" }
 dgraph-schema = { path = "../engine/dgraph-schema" }
+bytes = "1.5"
 
 [dev-dependencies]
 proptest = "1.5"

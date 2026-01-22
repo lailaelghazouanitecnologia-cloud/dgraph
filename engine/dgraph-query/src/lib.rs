@@ -11,5 +11,9 @@ mod ast;
 mod executor;
 
 pub use parser::{Parser, ParseError};
-pub use ast::{Query, Mutation, Operation, Filter, Value};
+pub use ast::{
+    FacetOrder, FacetParam, FacetParams, Filter, FuncName, Function, GroupByAttr,
+    MathExpr, MathOp, Mutation, Object, Operation, Order, Query, RecurseArgs,
+    ShortestPathArgs, Subject, Triple, Value, VarContext, VarType,
+};
 pub use executor::Executor;

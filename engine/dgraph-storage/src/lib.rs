@@ -10,6 +10,6 @@ mod posting;
 mod mvcc;
 mod store;
 
-pub use posting::{Posting, PostingList, PostingKind};
-pub use mvcc::{MvccLayer, TxnContext};
+pub use posting::{Facet, Op, Posting, PostingKind, PostingList, PostingType, ValType};
+pub use mvcc::{MvccLayer, Txn, TxnContext};
 pub use store::{Store, StoreConfig};

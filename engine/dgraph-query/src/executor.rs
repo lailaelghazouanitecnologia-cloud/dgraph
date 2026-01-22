@@ -4,7 +4,7 @@
 
 use crate::ast::{FuncName, Query, Value};
 use dgraph_common::{Key, Result, Timestamp, Uid};
-use dgraph_storage::{PostingKind, Store};
+use dgraph_storage::{PostingType, Store};
 use serde_json::{json, Value as JsonValue};
 use std::sync::Arc;
 
@@ -108,12 +108,12 @@ impl Executor {
                     let values: Vec<JsonValue> = posting_list
                         .iter_at(read_ts)
                         .filter_map(|p| {
-                            match p.kind {
-                                PostingKind::Value => {
+                            match p.posting_type {
+                                PostingType::Value | PostingType::ValueLang => {
                                     // Parse value as JSON
                                     serde_json::from_slice(&p.value).ok()
                                 }
-                                PostingKind::Ref => {
+                                PostingType::Ref => {
                                     // Recursively expand if there are children
                                     if child.children.is_empty() {
                                         Uid::new(p.uid).ok().map(|u| {
@@ -132,7 +132,7 @@ impl Executor {
                         .collect();
 
                     // Single value or array
-                    if values.len() == 1 && posting_list.iter_at(read_ts).any(|p| p.kind == PostingKind::Value) {
+                    if values.len() == 1 && posting_list.iter_at(read_ts).any(|p| p.posting_type == PostingType::Value || p.posting_type == PostingType::ValueLang) {
                         result.insert(attr.clone(), values.into_iter().next().unwrap());
                     } else if !values.is_empty() {
                         result.insert(attr.clone(), JsonValue::Array(values));
