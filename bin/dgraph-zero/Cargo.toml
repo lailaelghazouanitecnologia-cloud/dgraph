@@ -1,0 +1,17 @@
+[package]
+name = "dgraph-zero"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "dgraph-zero"
+path = "src/main.rs"
+
+[dependencies]
+dgraph-common.workspace = true
+dgraph-raft.workspace = true
+dgraph-proto.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true

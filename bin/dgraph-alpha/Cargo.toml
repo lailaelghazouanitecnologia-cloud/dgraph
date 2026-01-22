@@ -1,0 +1,21 @@
+[package]
+name = "dgraph-alpha"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "dgraph-alpha"
+path = "src/main.rs"
+
+[dependencies]
+dgraph-common.workspace = true
+dgraph-storage.workspace = true
+dgraph-query.workspace = true
+dgraph-raft.workspace = true
+dgraph-schema.workspace = true
+dgraph-proto.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+serde_json.workspace = true

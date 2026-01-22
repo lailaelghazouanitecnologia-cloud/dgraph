@@ -1,0 +1,72 @@
+[workspace]
+resolver = "2"
+members = [
+    "engine/dgraph-common",
+    "engine/dgraph-storage",
+    "engine/dgraph-query",
+    "engine/dgraph-raft",
+    "engine/dgraph-schema",
+    "engine/dgraph-proto",
+    "bin/dgraph-alpha",
+    "bin/dgraph-zero",
+    "test",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+license = "Apache-2.0"
+repository = "https://github.com/dgraph-io/dgraph"
+
+[workspace.dependencies]
+# Internal crates
+dgraph-common = { path = "engine/dgraph-common" }
+dgraph-storage = { path = "engine/dgraph-storage" }
+dgraph-query = { path = "engine/dgraph-query" }
+dgraph-raft = { path = "engine/dgraph-raft" }
+dgraph-schema = { path = "engine/dgraph-schema" }
+dgraph-proto = { path = "engine/dgraph-proto" }
+
+# Async runtime
+tokio = { version = "1.43", features = ["full"] }
+
+# Serialization
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+bincode = "1.3"
+prost = "0.13"
+prost-types = "0.13"
+
+# Storage
+rocksdb = "0.22"
+
+# Networking
+tonic = "0.12"
+hyper = { version = "1.5", features = ["full"] }
+axum = "0.7"
+
+# Raft
+raft = "0.7"
+
+# Utils
+thiserror = "2.0"
+anyhow = "1.0"
+tracing = "0.1"
+tracing-subscriber = "0.3"
+bytes = "1.9"
+parking_lot = "0.12"
+crossbeam = "0.8"
+dashmap = "6.1"
+ahash = "0.8"
+
+# Testing
+proptest = "1.5"
+criterion = "0.5"
+
+[profile.release]
+lto = true
+codegen-units = 1
+panic = "abort"
+
+[profile.dev]
+panic = "abort"
