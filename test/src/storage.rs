@@ -413,3 +413,277 @@ fn facet_bool() {
     assert_eq!(f.as_bool(), Some(true));
     assert_eq!(f.val_type, ValType::Bool);
 }
+
+// ============================================================================
+// Tokenizer Tests
+// ============================================================================
+
+use dgraph_storage::{
+    BoolTokenizer, ExactTokenizer, FloatTokenizer, FulltextTokenizer, HashTokenizer,
+    IntTokenizer, TermTokenizer, Token, Tokenizer, TokenizerId, TokenizerRegistry,
+    TrigramTokenizer,
+};
+
+#[test]
+fn tokenizer_exact_preserves_case() {
+    let tok = ExactTokenizer;
+    let tokens = tok.tokenize_string("Hello World!");
+    assert_eq!(tokens.len(), 1);
+    assert_eq!(tokens[0].data.as_ref(), b"Hello World!");
+    assert!(tok.is_sortable());
+    assert!(!tok.is_lossy());
+}
+
+#[test]
+fn tokenizer_term_splits_words() {
+    let tok = TermTokenizer;
+    let tokens = tok.tokenize_string("The Quick Brown Fox");
+    assert_eq!(tokens.len(), 4);
+    // All should be lowercase
+    assert!(tokens.iter().all(|t| {
+        let s = std::str::from_utf8(&t.data).unwrap();
+        s == s.to_lowercase()
+    }));
+    assert!(!tok.is_sortable());
+    assert!(tok.is_lossy());
+}
+
+#[test]
+fn tokenizer_trigram_generates_substrings() {
+    let tok = TrigramTokenizer;
+    let tokens = tok.tokenize_string("hello");
+    // "hel", "ell", "llo" = 3 trigrams
+    assert_eq!(tokens.len(), 3);
+
+    // Short strings get preserved as-is
+    let short = tok.tokenize_string("ab");
+    assert_eq!(short.len(), 1);
+}
+
+#[test]
+fn tokenizer_hash_consistent() {
+    let tok = HashTokenizer;
+    let t1 = tok.tokenize_string("test");
+    let t2 = tok.tokenize_string("test");
+    let t3 = tok.tokenize_string("different");
+
+    // Same input = same hash
+    assert_eq!(t1[0].data, t2[0].data);
+    // Different input = different hash
+    assert_ne!(t1[0].data, t3[0].data);
+    // Hash is always 8 bytes
+    assert_eq!(t1[0].data.len(), 8);
+}
+
+#[test]
+fn tokenizer_int_sortable_ordering() {
+    let tok = IntTokenizer;
+
+    let t_neg = tok.tokenize_int(-1000);
+    let t_zero = tok.tokenize_int(0);
+    let t_pos = tok.tokenize_int(1000);
+    let t_max = tok.tokenize_int(i64::MAX);
+    let t_min = tok.tokenize_int(i64::MIN);
+
+    // Byte ordering should match numeric ordering
+    assert!(t_min[0].data < t_neg[0].data);
+    assert!(t_neg[0].data < t_zero[0].data);
+    assert!(t_zero[0].data < t_pos[0].data);
+    assert!(t_pos[0].data < t_max[0].data);
+}
+
+#[test]
+fn tokenizer_float_sortable_ordering() {
+    let tok = FloatTokenizer;
+
+    let t_neg = tok.tokenize_float(-1.5);
+    let t_zero = tok.tokenize_float(0.0);
+    let t_pos = tok.tokenize_float(1.5);
+
+    // Byte ordering should match numeric ordering
+    assert!(t_neg[0].data < t_zero[0].data);
+    assert!(t_zero[0].data < t_pos[0].data);
+}
+
+#[test]
+fn tokenizer_bool_values() {
+    let tok = BoolTokenizer;
+
+    let t_true = tok.tokenize_bool(true);
+    let t_false = tok.tokenize_bool(false);
+
+    assert_eq!(t_true[0].data.as_ref(), &[1u8]);
+    assert_eq!(t_false[0].data.as_ref(), &[0u8]);
+}
+
+#[test]
+fn tokenizer_fulltext_removes_stopwords() {
+    let tok = FulltextTokenizer;
+
+    // "the" and "is" are stopwords
+    let tokens = tok.tokenize_string("The fox is quick");
+
+    let words: Vec<&str> = tokens
+        .iter()
+        .map(|t| std::str::from_utf8(&t.data).unwrap())
+        .collect();
+
+    assert!(!words.contains(&"the"));
+    assert!(!words.contains(&"is"));
+    assert!(words.contains(&"fox"));
+    assert!(words.contains(&"quick"));
+}
+
+#[test]
+fn tokenizer_fulltext_deduplicates() {
+    let tok = FulltextTokenizer;
+
+    let tokens = tok.tokenize_string("fox fox fox");
+    // Should only have one "fox" token
+    assert_eq!(tokens.len(), 1);
+}
+
+#[test]
+fn token_encoding_roundtrip() {
+    let original = Token::from_str(TokenizerId::Exact, "hello world");
+    let encoded = original.encode();
+    let decoded = Token::decode(&encoded).unwrap();
+
+    assert_eq!(decoded.id, original.id);
+    assert_eq!(decoded.data, original.data);
+}
+
+#[test]
+fn tokenizer_registry_finds_all() {
+    let registry = TokenizerRegistry::new();
+
+    // All built-in tokenizers should be findable
+    assert!(registry.get("exact").is_some());
+    assert!(registry.get("term").is_some());
+    assert!(registry.get("trigram").is_some());
+    assert!(registry.get("hash").is_some());
+    assert!(registry.get("int").is_some());
+    assert!(registry.get("float").is_some());
+    assert!(registry.get("bool").is_some());
+    assert!(registry.get("fulltext").is_some());
+
+    // Unknown tokenizers return None
+    assert!(registry.get("unknown").is_none());
+}
+
+// ============================================================================
+// Index Tests
+// ============================================================================
+
+use dgraph_storage::{
+    generate_index_mutations, generate_int_index_mutations, CountKey, IndexEntry, IndexLookup,
+    IndexMutation, IndexOp, IndexSpec, ReverseKey,
+};
+
+#[test]
+fn index_spec_builder_pattern() {
+    let spec = IndexSpec::new()
+        .with_tokenizer("exact")
+        .with_tokenizer("term")
+        .with_count()
+        .with_reverse()
+        .with_upsert();
+
+    assert_eq!(spec.tokenizers.len(), 2);
+    assert!(spec.tokenizers.contains(&"exact".to_string()));
+    assert!(spec.tokenizers.contains(&"term".to_string()));
+    assert!(spec.count);
+    assert!(spec.reverse);
+    assert!(spec.upsert);
+    assert!(spec.is_indexed());
+}
+
+#[test]
+fn index_spec_empty_not_indexed() {
+    let spec = IndexSpec::new();
+    assert!(!spec.is_indexed());
+}
+
+#[test]
+fn index_mutations_add_new_value() {
+    let tok = TermTokenizer;
+    let uid = Uid::new(123).unwrap();
+
+    let mutations = generate_index_mutations(&tok, "name", uid, None, Some("hello world"));
+
+    assert_eq!(mutations.len(), 2); // "hello" and "world"
+    assert!(mutations.iter().all(|m| m.op == IndexOp::Add));
+}
+
+#[test]
+fn index_mutations_remove_old_value() {
+    let tok = TermTokenizer;
+    let uid = Uid::new(123).unwrap();
+
+    let mutations = generate_index_mutations(&tok, "name", uid, Some("hello world"), None);
+
+    assert_eq!(mutations.len(), 2);
+    assert!(mutations.iter().all(|m| m.op == IndexOp::Remove));
+}
+
+#[test]
+fn index_mutations_update_value() {
+    let tok = ExactTokenizer;
+    let uid = Uid::new(123).unwrap();
+
+    let mutations = generate_index_mutations(&tok, "name", uid, Some("old"), Some("new"));
+
+    assert_eq!(mutations.len(), 2);
+    assert!(mutations.iter().any(|m| m.op == IndexOp::Remove));
+    assert!(mutations.iter().any(|m| m.op == IndexOp::Add));
+}
+
+#[test]
+fn index_int_mutations() {
+    let tok = IntTokenizer;
+    let uid = Uid::new(123).unwrap();
+
+    let mutations = generate_int_index_mutations(&tok, "age", uid, None, Some(25));
+
+    assert_eq!(mutations.len(), 1);
+    assert_eq!(mutations[0].op, IndexOp::Add);
+}
+
+#[test]
+fn index_entry_creates_valid_key() {
+    let token = Token::from_str(TokenizerId::Exact, "test");
+    let uid = Uid::new(123).unwrap();
+    let entry = IndexEntry::new("name", token, uid);
+
+    let key = entry.key().unwrap();
+    assert_eq!(key.kind(), dgraph_common::KeyKind::Index);
+    assert_eq!(key.predicate(), Some("name"));
+}
+
+#[test]
+fn count_key_encoding() {
+    let ck = CountKey::new("friends", 10, false);
+    let encoded = ck.encode();
+
+    // First byte is KeyKind::Count
+    assert_eq!(encoded[0], dgraph_common::KeyKind::Count as u8);
+}
+
+#[test]
+fn reverse_key_creates_valid_key() {
+    let uid = Uid::new(456).unwrap();
+    let rk = ReverseKey::new("follows", uid);
+
+    let key = rk.key().unwrap();
+    assert_eq!(key.kind(), dgraph_common::KeyKind::Reverse);
+    assert_eq!(key.predicate(), Some("follows"));
+}
+
+#[test]
+fn index_lookup_creates_valid_key() {
+    let token = Token::from_str(TokenizerId::Term, "john");
+    let lookup = IndexLookup::new("name", token);
+
+    let key = lookup.key().unwrap();
+    assert_eq!(key.kind(), dgraph_common::KeyKind::Index);
+}
